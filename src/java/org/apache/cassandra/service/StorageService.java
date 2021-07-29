@@ -4530,6 +4530,12 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         onFinish.run();
     }
 
+    public void streamHintsBlocking() throws ExecutionException, InterruptedException
+    {
+        Future hintsSuccess = streamHints();
+        hintsSuccess.get();
+    }
+
     private Future streamHints()
     {
         return HintsService.instance.transferHints(this::getPreferredHintsStreamTarget);
