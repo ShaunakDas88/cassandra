@@ -217,11 +217,27 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public List<Range<Token>> getLocalAndPendingRanges(String ks)
     {
+        List<Range<Token>> ranges = new ArrayList<>();
+        ranges.addAll(getLocalRanges(ks));
+        ranges.addAll(getPendingRanges(ks));
+        return ranges;
+    }
+
+    public List<Range<Token>> getLocalRanges(String ks)
+    {
         InetAddressAndPort broadcastAddress = FBUtilities.getBroadcastAddressAndPort();
         Keyspace keyspace = Keyspace.open(ks);
         List<Range<Token>> ranges = new ArrayList<>();
         for (Replica r : keyspace.getReplicationStrategy().getAddressReplicas(broadcastAddress))
             ranges.add(r.range());
+        return ranges;
+    }
+
+    public List<Range<Token>> getPendingRanges(String ks)
+    {
+        InetAddressAndPort broadcastAddress = FBUtilities.getBroadcastAddressAndPort();
+        Keyspace keyspace = Keyspace.open(ks);
+        List<Range<Token>> ranges = new ArrayList<>();
         for (Replica r : getTokenMetadata().getPendingRanges(ks, broadcastAddress))
             ranges.add(r.range());
         return ranges;
