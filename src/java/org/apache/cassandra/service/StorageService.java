@@ -18,6 +18,7 @@
 package org.apache.cassandra.service;
 
 import java.io.*;
+import java.net.ConnectException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.ByteBuffer;
@@ -128,6 +129,7 @@ import static org.apache.cassandra.config.CassandraRelevantProperties.REPLACEMEN
 import static org.apache.cassandra.index.SecondaryIndexManager.getIndexName;
 import static org.apache.cassandra.index.SecondaryIndexManager.isIndexColumnFamily;
 import static org.apache.cassandra.net.NoPayload.noPayload;
+import static org.apache.cassandra.net.Verb.HINT_TRANSFER_REQ;
 import static org.apache.cassandra.net.Verb.REPLICATION_DONE_REQ;
 import static org.apache.cassandra.schema.MigrationManager.evolveSystemKeyspace;
 
@@ -279,6 +281,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     public static final boolean useStrictConsistency = Boolean.parseBoolean(System.getProperty("cassandra.consistent.rangemovement", "true"));
     private static final boolean allowSimultaneousMoves = Boolean.parseBoolean(System.getProperty("cassandra.consistent.simultaneousmoves.allow","false"));
     private static final boolean joinRing = Boolean.parseBoolean(System.getProperty("cassandra.join_ring", "true"));
+    private static final boolean replaceNodeTransferHints = Boolean.parseBoolean(System.getProperty("cassandra.replace_node_transfer_hints", "false"));
     private boolean replacing;
 
     private final StreamStateStore streamStateStore = new StreamStateStore();
@@ -911,6 +914,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                 localHostId = prepareForReplacement();
                 appStates.put(ApplicationState.TOKENS, valueFactory.tokens(bootstrapTokens));
 
+                InetAddressAndPort replaceAddress = DatabaseDescriptor.getReplaceAddress();
+                if (replaceNodeTransferHints)
+                {
+                    // send message to replacing node that it should transfer it's stored hints to closest neighbor
+                    sendTransferHintsNotification(replaceAddress);
+                }
+
                 if (!shouldBootstrap())
                 {
                     // Will not do replace procedure, persist the tokens we're taking over locally
@@ -923,7 +933,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
                     logger.warn("Writes will not be forwarded to this node during replacement because it has the same address as " +
                                 "the node to be replaced ({}). If the previous node has been down for longer than max_hint_window_in_ms, " +
                                 "repair must be run after the replacement process in order to make this node consistent.",
-                                DatabaseDescriptor.getReplaceAddress());
+                                replaceAddress);
                     appStates.put(ApplicationState.STATUS_WITH_PORT, valueFactory.hibernate(true));
                     appStates.put(ApplicationState.STATUS, valueFactory.hibernate(true));
                 }
@@ -1760,6 +1770,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         invalidateDiskBoundaries();
 
         Future<StreamState> bootstrapStream = startBootstrap(tokens);
+
         try
         {
             if (bootstrapTimeoutMillis > 0)
@@ -4528,6 +4539,13 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         logger.debug("stream acks all received.");
         leaveRing();
         onFinish.run();
+    }
+
+    private void sendTransferHintsNotification(InetAddressAndPort remote)
+    {
+            logger.debug("Notifying node {} to transfer hints to its nearest neighbor", remote);
+            Message msg = Message.out(HINT_TRANSFER_REQ, noPayload);
+            MessagingService.instance().send(msg, remote);
     }
 
     public void streamHintsBlocking() throws ExecutionException, InterruptedException
